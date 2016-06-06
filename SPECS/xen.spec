@@ -47,12 +47,12 @@
 
 
 # Hypervisor ABI
-%define hv_abi  4.6
+%define hv_abi  4.7
 
 Summary: Xen is a virtual machine monitor
 Name:    xen
-Version: 4.6.1
-Release: 11%{?dist}
+Version: 4.7rc4
+Release: 1%{?dist}
 Group:   Development/Libraries
 License: GPLv2+ and LGPLv2+ and BSD
 URL:     http://xen.org/
@@ -92,19 +92,8 @@ Patch1006: xsa155-centos-0002-blktap2-Use-RING_COPY_REQUEST-block-log-only.patch
 
 # aarch64-only
 Patch2001: qemuu-hw-block-xen-disk-WORKAROUND-disable-batch-map-when-.patch
-Patch2004: xsa162-qemuu.patch
-Patch2005: xsa179-qemuu-4.6-0001-vga-fix-banked-access-bounds-checking-CVE-2016-3710.patch
-Patch2006: xsa179-qemuu-4.6-0002-vga-add-vbe_enabled-helper.patch
-Patch2007: xsa179-qemuu-4.6-0003-vga-factor-out-vga-register-setup.patch
-Patch2008: xsa179-qemuu-4.6-0004-vga-update-vga-register-setup-on-vbe-changes.patch
-Patch2009: xsa179-qemuu-4.6-0005-vga-make-sure-vga-register-setup-for-vbe-stays-intac.patch
 Patch2010: xsa180-qemuu.patch
 
-Patch3001: xsa179-qemut-unstable-0001-vga-fix-banked-access-bounds-checking-CVE-2016-3710.patch
-Patch3002: xsa179-qemut-unstable-0002-vga-add-vbe_enabled-helper.patch
-Patch3003: xsa179-qemut-unstable-0003-vga-factor-out-vga-register-setup.patch
-Patch3004: xsa179-qemut-unstable-0004-vga-update-vga-register-setup-on-vbe-changes.patch
-Patch3005: xsa179-qemut-unstable-0005-vga-make-sure-vga-register-setup-for-vbe-stays-intac.patch
 Patch3010: xsa180-qemut.patch
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -316,22 +305,11 @@ pushd tools/qemu-xen
 %ifarch aarch64
 %patch2001 -p1
 %endif
-%patch2004 -p1
-%patch2005 -p1
-%patch2006 -p1
-%patch2007 -p1
-%patch2008 -p1
-%patch2009 -p1
 %patch2010 -p1
 popd
 
 pushd tools/qemu-xen-traditional
 # Add qemu-traditional-related patches here
-%patch3001 -p1
-%patch3002 -p1
-%patch3003 -p1
-%patch3004 -p1
-%patch3005 -p1
 %patch3010 -p1
 popd
 
@@ -373,7 +351,7 @@ mkdir -p dist/install/boot/efi/efi/%{xen_efi_vendor}
 export XEN_VENDORVERSION="-$(echo %{release} | sed 's/.centos.alt//g')"
 export XEN_DOMAIN="centos.org"
 export debug="n"
-export CFLAGS="$RPM_OPT_FLAGS"
+export CFLAGS_EXTRA="$RPM_OPT_FLAGS"
 
 %if %{with_blktap}
 %else
@@ -403,9 +381,11 @@ make %{?_smp_mflags} %{?efi_flags}   dist-xen
 make %{?_smp_mflags} %{?ocaml_flags} dist-tools
 make                                 dist-docs
 
-unset CFLAGS
-
 %if %{with_stubdom}
+# -fexceptions causes the stubdom build to fail
+export CFLAGS_EXTRA=${CFLAGS_EXTRA/-fexceptions/}
+# ...And maybe other things cause pv_grub to break?
+unset CFLAGS_EXTRA
 make %{?ocaml_flags} dist-stubdom
 %endif
 
@@ -473,7 +453,7 @@ rm -rf %{buildroot}/boot/xen-4.0.gz
 rm -rf %{buildroot}/boot/xen-4.gz
 
 # silly doc dir fun
-rm -fr %{buildroot}%{_datadir}/doc/xen
+rm -rf %{buildroot}%{_datadir}/doc/xen
 rm -rf %{buildroot}%{_datadir}/doc/qemu
 mkdir -p %{buildroot}%{_datadir}/%{name}
 mkdir -p %{buildroot}%{_datadir}/doc/%{name}-licenses-%{version}-%{release}
@@ -497,9 +477,16 @@ do
 done
 rm -f %{buildroot}/%{_mandir}/man1/qemu*
 rm -f %{buildroot}/%{_mandir}/man8/qemu*
-mkdir -p %{buildroot}/%{_sysconfdir}/qemu/
-mv %{buildroot}/%{_prefix}/%{_sysconfdir}/qemu/* %{buildroot}/%{_sysconfdir}/qemu/
-rm -rf %{buildroot}/%{_prefix}/%{_sysconfdir}
+#rm -rf %{buildroot}/%{_prefix}/%{_sysconfdir}
+
+# Extraneous blktap log stuff
+rm -f %{buildroot}/%{_prefix}/%{_sysconfdir}/cron.daily/blktap-log-cleanup
+rm -f %{buildroot}/%{_prefix}/%{_sysconfdir}/logrotate.d/blktap
+rm -f %{buildroot}/%{_prefix}/%{_sysconfdir}/udev/rules.d/blktap.rules
+
+# Unused FLASK stuff
+rm -f %{buildroot}%{_sbindir}/flask-*
+rm -rf %{buildroot}/boot/xenpolicy-*
 
 # README's not intended for end users
 rm -f %{buildroot}/%{_sysconfdir}/xen/README*
@@ -549,11 +536,6 @@ install -m 644 %{SOURCE49} %{buildroot}/usr/lib/tmpfiles.d/xen.conf
 %if %{with_spice}
 rm -rf %{buildroot}%{_libdir}/xen/include
 rm -rf %{buildroot}%{_libdir}/xen/lib
-%endif
-
-# Not sure why qemu makes an x86_64 file when building on aarch64...
-%ifarch aarch64
-rm -f %{buildroot}%{_sysconfdir}/qemu/target-x86_64.conf
 %endif
 
 ############ create dirs in /var ############
@@ -724,12 +706,10 @@ rm -rf %{buildroot}
 # QEMU-xen runtime files
 %dir %{_datadir}/qemu-xen
 %{_datadir}/qemu-xen/*
-%dir %{_sysconfdir}/qemu/
 %{_datadir}/locale/*/LC_MESSAGES/qemu.mo
 
 %ifarch x86_64
 # QEMU runtime files
-%{_sysconfdir}/qemu/target-%{_arch}.conf
 %dir %{_datadir}/%{name}/qemu
 %dir %{_datadir}/%{name}/qemu/keymaps
 %{_datadir}/%{name}/qemu/keymaps/*
@@ -800,6 +780,7 @@ rm -rf %{buildroot}
 %{_sbindir}/xentrace_setmask
 %{_sbindir}/xentrace_setsize
 %{_bindir}/xentrace_format
+%{_bindir}/xen-cpuid
 # Misc stuff
 %{_sbindir}/gtrace*
 %{_sbindir}/xen-bugtool
@@ -817,6 +798,7 @@ rm -rf %{buildroot}
 %{_sbindir}/xl
 %{_sbindir}/xen-ringwatch
 %{_sbindir}/xencov
+%{_sbindir}/xen-xsplice
 #x86-only stuff
 %ifarch x86_64
 %{_bindir}/qemu-*-xen
@@ -854,6 +836,7 @@ rm -rf %{buildroot}
 %ifarch x86_64
 /boot/xen-*.gz
 /boot/xen.gz
+/boot/xen-*.config
 %endif
 %ifarch aarch64
 # fixme, what is this on arch?
@@ -918,6 +901,9 @@ rm -rf %{buildroot}
 %endif
 
 %changelog
+* Tue May 31 2016 George Dunlap <george.dunlap@citrix.com> 4.7rc4-1.el6.centos
+- Rebase to 4.7-rc4
+
 * Thu May 19 2016 George Dunlap <george.dunlap@citrix.com> 4.6.1-11.el6.centos
 - Gratuitous release bump due to CBS build failure
 

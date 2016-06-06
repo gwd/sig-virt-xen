@@ -1,6 +1,6 @@
-From 7459177e5c8350dfcde86b2012314bf52d03136e Mon Sep 17 00:00:00 2001
+From 431869811cb8bb36ba7bc42c81fd8aabe6e0e6a9 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Thu, 11 Feb 2016 11:29:17 +0000
+Date: Tue, 31 May 2016 15:54:14 +0100
 Subject: [PATCH] tools/hotplug: Before running xenstored, run restorecon if
  available to reset selinux labels
 
@@ -47,9 +47,9 @@ index a5f836b..9d61024 100644
 2.1.4
 
 
-From 8abd7be4662e8ded6823e857f80e29ebde67045b Mon Sep 17 00:00:00 2001
+From c01d953e2b9ebde4e4675fa68727a4b786d36894 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Thu, 11 Feb 2016 11:29:17 +0000
+Date: Tue, 31 May 2016 15:54:14 +0100
 Subject: [PATCH] tools/hotplug: Call xenstored directly rather than via sh
 
 Using sh to exec xenstored breaks on selinux systems (at least, on
@@ -115,9 +115,102 @@ index 9d61024..15defbe 100644
 2.1.4
 
 
-From c3d76f2e47d90f8fe8fd02ba20429a339125a0a9 Mon Sep 17 00:00:00 2001
+From 77d764ed329f07494fe18a07b3f870ec007f8bf4 Mon Sep 17 00:00:00 2001
+From: George Dunlap <george.dunlap@citrix.com>
+Date: Tue, 7 Jun 2016 11:23:02 +0100
+Subject: [PATCH] libxc: Try /proc/xen/privcmd on EACCES as well
+
+/proc/xen/privcmd is deprecated in favor of /dev/xen/privcmd; but at
+the moment the SELinux rules in CentOS 7 are outdated and only know
+about /proc; access to the /dev node will result in EACCES.
+
+As a temporary work-around, try to read the /proc path if opening the /dev
+path fails with EACCES.
+
+Signed-off-by: George Dunlap <george.dunlap@citrix.com>
+---
+ tools/libs/call/linux.c          | 2 +-
+ tools/libs/foreignmemory/linux.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/libs/call/linux.c b/tools/libs/call/linux.c
+index e8e0311..36572e9 100644
+--- a/tools/libs/call/linux.c
++++ b/tools/libs/call/linux.c
+@@ -39,7 +39,7 @@ int osdep_xencall_open(xencall_handle *xcall)
+      */
+     fd = open("/dev/xen/privcmd", O_RDWR|O_CLOEXEC);
+ 
+-    if ( fd == -1 && ( errno == ENOENT || errno == ENXIO || errno == ENODEV ))
++    if ( fd == -1 && ( errno == ENOENT || errno == ENXIO || errno == ENODEV || errno == EACCES ))
+     {
+         /* Fallback to /proc/xen/privcmd */
+         fd = open("/proc/xen/privcmd", O_RDWR|O_CLOEXEC);
+diff --git a/tools/libs/foreignmemory/linux.c b/tools/libs/foreignmemory/linux.c
+index 423c744..72e4b07 100644
+--- a/tools/libs/foreignmemory/linux.c
++++ b/tools/libs/foreignmemory/linux.c
+@@ -41,7 +41,7 @@ int osdep_xenforeignmemory_open(xenforeignmemory_handle *fmem)
+     /* prefer this newer interface */
+     fd = open("/dev/xen/privcmd", O_RDWR|O_CLOEXEC);
+ 
+-    if ( fd == -1 && ( errno == ENOENT || errno == ENXIO || errno == ENODEV ))
++    if ( fd == -1 && ( errno == ENOENT || errno == ENXIO || errno == ENODEV || errno == EACCES ))
+     {
+         /* Fallback to /proc/xen/privcmd */
+         fd = open("/proc/xen/privcmd", O_RDWR|O_CLOEXEC);
+-- 
+2.1.4
+
+
+From ece01989c3e54137f6728558aa5c97742502357b Mon Sep 17 00:00:00 2001
+From: George Dunlap <george.dunlap@citrix.com>
+Date: Tue, 31 May 2016 18:41:48 +0100
+Subject: [PATCH] build: Allow extra CFLAGS to be passed in via CFLAGS_EXTRA
+
+Many package systems have a standard set of CFLAGS which want to be
+enabled by default in all packages.  (For example, Fedora and CentOS
+systems want to add $RPM_OPT_FLAGS.)
+
+Before c/s 9a6787c, this was possible by simply setting the CFLAGS
+environment variable before running make; but since that changeset,
+this causes strange errors on build, like the following:
+
+<command-line>:0:0: error: "__OBJECT_FILE__" redefined [-Werror]
+<command-line>:0:0: note: this is the location of the previous definition
+cc1: all warnings being treated as errors
+
+Instead, provide a specific variable, CFLAGS_EXTRA, for builders to
+pass in extra flags.
+
+Note that these flags are not filtered for appropriateness in any way;
+it is up to the caller to make sure that the flags passed in make
+sense.
+
+Based on a patch by Michael Young <m.a.young@durham.ac.uk>
+
+Signed-off-by: George Dunlap <george.dunlap@citrix.com>
+---
+ config/StdGNU.mk | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/config/StdGNU.mk b/config/StdGNU.mk
+index 39d36b2..ace7326 100644
+--- a/config/StdGNU.mk
++++ b/config/StdGNU.mk
+@@ -47,3 +47,5 @@ ifeq ($(lto),y)
+ CFLAGS += -flto
+ LDFLAGS-$(clang) += -plugin LLVMgold.so
+ endif
++
++CFLAGS += $(CFLAGS_EXTRA)
+-- 
+2.1.4
+
+
+From abd570aa0673d5c61860171a164db5c87363d68e Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Thu, 11 Feb 2016 11:29:17 +0000
+Date: Tue, 31 May 2016 15:54:14 +0100
 Subject: [PATCH] tools/Linux: Fix blktap module name in default module list
 
 The name of the blktap2 kernel module is... blktap.
@@ -129,10 +222,10 @@ Signed-off-by: George Dunlap <george.dunlap@citrix.com>
  2 files changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/tools/configure b/tools/configure
-index aa66876..40efc29 100755
+index 2fde4f4..b537f23 100755
 --- a/tools/configure
 +++ b/tools/configure
-@@ -4133,7 +4133,7 @@ xen-scsibk
+@@ -4153,7 +4153,7 @@ xen-scsibk
  usbbk
  pciback
  xen-acpi-processor
@@ -142,7 +235,7 @@ index aa66876..40efc29 100755
  ;;
  *)
 diff --git a/tools/configure.ac b/tools/configure.ac
-index 6c70040..6d1e9dd 100644
+index d0c9e63..21f069c 100644
 --- a/tools/configure.ac
 +++ b/tools/configure.ac
 @@ -105,7 +105,7 @@ xen-scsibk
@@ -158,52 +251,7 @@ index 6c70040..6d1e9dd 100644
 2.1.4
 
 
-From c12d4912beb22aca3be3e5a7c68706c172aaeeba Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Thu, 11 Feb 2016 11:29:17 +0000
-Subject: [PATCH] RFC: Check for grub boot sectors pretending to be an MBR
-
-Found this in the CentOS patchqueue -- haven't tracked down where it
-came from yet.
----
- tools/pygrub/src/pygrub | 5 +++++
- 1 file changed, 5 insertions(+)
-
-diff --git a/tools/pygrub/src/pygrub b/tools/pygrub/src/pygrub
-index e4aedda..c062190 100755
---- a/tools/pygrub/src/pygrub
-+++ b/tools/pygrub/src/pygrub
-@@ -127,6 +127,7 @@ def get_partition_offsets(file):
-     fd = os.open(file, os.O_RDONLY)
-     buf = os.read(fd, 512)
-     os.close(fd)
-+    offzerocount = 0
-     for poff in (446, 462, 478, 494): # partition offsets
- 
-         # MBR contains a 16 byte descriptor per partition
-@@ -136,6 +137,7 @@ def get_partition_offsets(file):
-         
-         # offset == 0 implies this partition is not enabled
-         if offset == 0:
-+            offzerocount += 1
-             continue
- 
-         if type == FDISK_PART_SOLARIS or type == FDISK_PART_SOLARIS_OLD:
-@@ -156,6 +158,9 @@ def get_partition_offsets(file):
-         else:
-             part_offs.append(offset)
- 
-+    if offzerocount == 4:
-+        # Might be a grub boot sector pretending to be an MBR
-+        part_offs.append(0)
-     return part_offs
- 
- class GrubLineEditor(curses.textpad.Textbox):
--- 
-2.1.4
-
-
-From 7886619f3bfc42403052dc3463ad7f3f7ba2468d Mon Sep 17 00:00:00 2001
+From 68da31e625b9760605d006ee8b727144cfb0e7ec Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] xen: Allow user to specify an alternate linker for EFI
@@ -219,50 +267,52 @@ Signed-off-by: George Dunlap <george.dunlap@citrix.com>
  3 files changed, 5 insertions(+), 4 deletions(-)
 
 diff --git a/xen/Makefile b/xen/Makefile
-index 928e2f8..62e409c 100644
+index 0d5f240..e90638a 100644
 --- a/xen/Makefile
 +++ b/xen/Makefile
-@@ -16,6 +16,7 @@ export BASEDIR := $(CURDIR)
- export XEN_ROOT := $(BASEDIR)/..
+@@ -20,6 +20,7 @@ export XEN_ROOT := $(BASEDIR)/..
+ MAKEFLAGS += -rR
  
  EFI_MOUNTPOINT ?= $(BOOT_DIR)/efi
 +LD_EFI ?= $(LD)
  
- .PHONY: default
- default: build
+ ARCH=$(XEN_TARGET_ARCH)
+ SRCARCH=$(shell echo $(ARCH) | sed -e 's/x86.*/x86/' -e s'/arm\(32\|64\)/arm/g')
 diff --git a/xen/arch/x86/Makefile b/xen/arch/x86/Makefile
-index 5f24951..d87c2c1 100644
+index 4665a68..b57dfde 100644
 --- a/xen/arch/x86/Makefile
 +++ b/xen/arch/x86/Makefile
-@@ -130,18 +130,18 @@ $(TARGET).efi: ALT_BASE = 0x$(shell $(NM) efi/relocs-dummy.o | sed -n 's, A ALT_
- $(TARGET).efi: guard = $(if $(shell echo efi/dis* | grep disabled),:)
+@@ -168,20 +168,20 @@ endif
+ 
  $(TARGET).efi: prelink-efi.o efi.lds efi/relocs-dummy.o $(BASEDIR)/common/symbols-dummy.o efi/mkreloc
  	$(foreach base, $(VIRT_BASE) $(ALT_BASE), \
 -	          $(guard) $(LD) $(call EFI_LDFLAGS,$(base)) -T efi.lds -N $< efi/relocs-dummy.o \
 +	          $(guard) $(LD_EFI) $(call EFI_LDFLAGS,$(base)) -T efi.lds -N $< efi/relocs-dummy.o \
  	                $(BASEDIR)/common/symbols-dummy.o -o $(@D)/.$(@F).$(base).0 &&) :
  	$(guard) efi/mkreloc $(foreach base,$(VIRT_BASE) $(ALT_BASE),$(@D)/.$(@F).$(base).0) >$(@D)/.$(@F).0r.S
- 	$(guard) $(NM) -n $(@D)/.$(@F).$(VIRT_BASE).0 | $(guard) $(BASEDIR)/tools/symbols >$(@D)/.$(@F).0s.S
+ 	$(guard) $(NM) -pa --format=sysv $(@D)/.$(@F).$(VIRT_BASE).0 \
+ 		| $(guard) $(BASEDIR)/tools/symbols $(all_symbols) --sysv --sort >$(@D)/.$(@F).0s.S
  	$(guard) $(MAKE) -f $(BASEDIR)/Rules.mk $(@D)/.$(@F).0r.o $(@D)/.$(@F).0s.o
  	$(foreach base, $(VIRT_BASE) $(ALT_BASE), \
 -	          $(guard) $(LD) $(call EFI_LDFLAGS,$(base)) -T efi.lds -N $< \
 +	          $(guard) $(LD_EFI) $(call EFI_LDFLAGS,$(base)) -T efi.lds -N $< \
  	                $(@D)/.$(@F).0r.o $(@D)/.$(@F).0s.o -o $(@D)/.$(@F).$(base).1 &&) :
  	$(guard) efi/mkreloc $(foreach base,$(VIRT_BASE) $(ALT_BASE),$(@D)/.$(@F).$(base).1) >$(@D)/.$(@F).1r.S
- 	$(guard) $(NM) -n $(@D)/.$(@F).$(VIRT_BASE).1 | $(guard) $(BASEDIR)/tools/symbols >$(@D)/.$(@F).1s.S
+ 	$(guard) $(NM) -pa --format=sysv $(@D)/.$(@F).$(VIRT_BASE).1 \
+ 		| $(guard) $(BASEDIR)/tools/symbols $(all_symbols) --sysv --sort >$(@D)/.$(@F).1s.S
  	$(guard) $(MAKE) -f $(BASEDIR)/Rules.mk $(@D)/.$(@F).1r.o $(@D)/.$(@F).1s.o
 -	$(guard) $(LD) $(call EFI_LDFLAGS,$(VIRT_BASE)) -T efi.lds -N $< \
 +	$(guard) $(LD_EFI) $(call EFI_LDFLAGS,$(VIRT_BASE)) -T efi.lds -N $< \
- 	                $(@D)/.$(@F).1r.o $(@D)/.$(@F).1s.o -o $@
+ 	                $(@D)/.$(@F).1r.o $(@D)/.$(@F).1s.o $(note_file) -o $@
  	if $(guard) false; then rm -f $@; echo 'EFI support disabled'; fi
  	rm -f $(@D)/.$(@F).[0-9]*
 diff --git a/xen/arch/x86/efi/Makefile b/xen/arch/x86/efi/Makefile
-index 1daa7ac..f5398c4 100644
+index 5099430..a6dae4c 100644
 --- a/xen/arch/x86/efi/Makefile
 +++ b/xen/arch/x86/efi/Makefile
 @@ -6,7 +6,7 @@ create = test -e $(1) || touch -t 199901010000 $(1)
  
- efi := $(filter y,$(x86_64)$(shell rm -f disabled))
+ efi := y$(shell rm -f disabled)
  efi := $(if $(efi),$(shell $(CC) $(filter-out $(CFLAGS-y) .%.d,$(CFLAGS)) -c check.c 2>disabled && echo y))
 -efi := $(if $(efi),$(shell $(LD) -mi386pep --subsystem=10 -o check.efi check.o 2>disabled && echo y))
 +efi := $(if $(efi),$(shell $(LD_EFI) -mi386pep --subsystem=10 -o check.efi check.o 2>disabled && echo y))
@@ -273,7 +323,7 @@ index 1daa7ac..f5398c4 100644
 2.1.4
 
 
-From 159eaa9ba272ef83a8386476eb8d0a6e66d6a52e Mon Sep 17 00:00:00 2001
+From b6906689efb1633aecf871eab91b03d8c1422598 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] Disable iptables on the bridge
@@ -284,7 +334,7 @@ Subject: [PATCH] Disable iptables on the bridge
  2 files changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/tools/hotplug/Linux/vif-bridge b/tools/hotplug/Linux/vif-bridge
-index 3d72ca4..79220d3 100644
+index 6956dea..69bc252 100644
 --- a/tools/hotplug/Linux/vif-bridge
 +++ b/tools/hotplug/Linux/vif-bridge
 @@ -93,8 +93,6 @@ case "$command" in
@@ -318,7 +368,7 @@ index 92ffa60..0b1fde9 100644
 2.1.4
 
 
-From 0a2157cce8415ec60fd2fecd79fa9cd7dc1e840e Mon Sep 17 00:00:00 2001
+From 754a45baccde86d90d721a8061749e0dfa335f2d Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] xen.use.fedora.ipxe.patch
@@ -330,18 +380,18 @@ Subject: [PATCH] xen.use.fedora.ipxe.patch
  3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/Config.mk b/Config.mk
-index b34be6a..f2c7a62 100644
+index f6e536e..8d8f752 100644
 --- a/Config.mk
 +++ b/Config.mk
-@@ -263,7 +263,7 @@ SEABIOS_UPSTREAM_REVISION ?= rel-1.8.2
- # Tue Mar 17 10:52:16 2015 -0400
- # vgabios: On bda_save_restore() the saved vbe_mode also has flags in it
+@@ -280,7 +280,7 @@ SEABIOS_UPSTREAM_REVISION ?= rel-1.9.2
+ # Tue, 1 Mar 2016 15:06:45 +0100 (16:06 +0200)
+ # fw/pci: add Q35 S3 support
  
 -ETHERBOOT_NICS ?= rtl8139 8086100e
 +ETHERBOOT_NICS ?= 10ec8139 8086100e
  
  
- QEMU_TRADITIONAL_REVISION ?= xen-4.6.1
+ QEMU_TRADITIONAL_REVISION ?= df553c056104e3dd8a2bd2e72539a57c4c085bae
 diff --git a/tools/firmware/Makefile b/tools/firmware/Makefile
 index 6cc86ce..1b54335 100644
 --- a/tools/firmware/Makefile
@@ -356,7 +406,7 @@ index 6cc86ce..1b54335 100644
  
  LD32BIT-$(CONFIG_FreeBSD) := LD32BIT_FLAG=-melf_i386_fbsd
 diff --git a/tools/firmware/hvmloader/Makefile b/tools/firmware/hvmloader/Makefile
-index 0560a7b..6610722 100644
+index f2f4791..c7e37ec 100644
 --- a/tools/firmware/hvmloader/Makefile
 +++ b/tools/firmware/hvmloader/Makefile
 @@ -54,7 +54,7 @@ CIRRUSVGA_ROM := ../vgabios/VGABIOS-lgpl-latest.cirrus.debug.bin
@@ -372,7 +422,7 @@ index 0560a7b..6610722 100644
 2.1.4
 
 
-From 9104d668ff69bd4f9b965ddb36aa857e8d7cb4e9 Mon Sep 17 00:00:00 2001
+From db119c713093b6d6a8b2c927dd6f94f8c2543f69 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] Revert "libxl: prefer qdisk over blktap when choosing disk
@@ -391,10 +441,10 @@ Acked-by: Ian Jackson <ian.jackson@eu.citrix.com>
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/tools/libxl/libxl_device.c b/tools/libxl/libxl_device.c
-index 8bb5e93..68823e3 100644
+index f79e536..0fb3755 100644
 --- a/tools/libxl/libxl_device.c
 +++ b/tools/libxl/libxl_device.c
-@@ -290,8 +290,8 @@ int libxl__device_disk_set_backend(libxl__gc *gc, libxl_device_disk *disk) {
+@@ -306,8 +306,8 @@ int libxl__device_disk_set_backend(libxl__gc *gc, libxl_device_disk *disk) {
      } else {
          ok=
              disk_try_backend(&a, LIBXL_DISK_BACKEND_PHY) ?:
@@ -409,7 +459,7 @@ index 8bb5e93..68823e3 100644
 2.1.4
 
 
-From b0286f931492feae38f6db7dd4e54887ed732b5e Mon Sep 17 00:00:00 2001
+From 4b9ceb9d7dfd508091206bf242a3e8d877d6f3a2 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] xen-centos-disable-CFLAGS-for-qemu.patch
@@ -419,52 +469,52 @@ Subject: [PATCH] xen-centos-disable-CFLAGS-for-qemu.patch
  1 file changed, 1 insertion(+)
 
 diff --git a/tools/Makefile b/tools/Makefile
-index 2618559..4157edf 100644
+index 6440dec..dec8639 100644
 --- a/tools/Makefile
 +++ b/tools/Makefile
-@@ -241,6 +241,7 @@ subdir-all-qemu-xen-dir: qemu-xen-dir-find
- 		source=.; \
- 	fi; \
- 	cd qemu-xen-dir; \
+@@ -247,6 +247,7 @@ subdir-all-qemu-xen-dir: qemu-xen-dir-find
+ 	else \
+ 		enable_trace_backend='' ; \
+ 	fi ; \
 +	env -u CFLAGS \
  	$$source/configure --enable-xen --target-list=i386-softmmu \
  		$(QEMU_XEN_ENABLE_DEBUG) \
- 		--prefix=$(LIBEXEC) \
+ 		$$enable_trace_backend \
 -- 
 2.1.4
 
 
-From d99f9e14afbe7add3304fb9045805f10223b283e Mon Sep 17 00:00:00 2001
+From 5e3e12b72fa7866d1118c4e057e69c94a7692ee5 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] Adapt libxl to use blktap 2.5 v0.9.2
 
 Signed-off-by: George Dunlap <george.dunlap@eu.citrix.com>
 ---
- tools/Rules.mk              |  7 ++++---
+ tools/Rules.mk              |  6 +++---
  tools/libxl/libxl_blktap2.c | 41 +++++++++++++++++++++++++++--------------
- 2 files changed, 31 insertions(+), 17 deletions(-)
+ 2 files changed, 30 insertions(+), 17 deletions(-)
 
 diff --git a/tools/Rules.mk b/tools/Rules.mk
-index 2c422bd..6d05c3c 100644
+index 9ef0b47..6824351 100644
 --- a/tools/Rules.mk
 +++ b/tools/Rules.mk
-@@ -64,9 +64,10 @@ endif
+@@ -145,10 +145,10 @@ endif
  LIBXL_BLKTAP ?= $(CONFIG_BLKTAP2)
  
  ifeq ($(LIBXL_BLKTAP),y)
 -CFLAGS_libblktapctl = -I$(XEN_BLKTAP2)/control -I$(XEN_BLKTAP2)/include $(CFLAGS_xeninclude)
--LDLIBS_libblktapctl = $(XEN_BLKTAP2)/control/libblktapctl$(libextension)
--SHLIB_libblktapctl  = -Wl,-rpath-link=$(XEN_BLKTAP2)/control
 +CFLAGS_libblktapctl = -I$(XEN_BLKTAP2)/include $(CFLAGS_xeninclude)
-+#LDLIBS_libblktapctl = -L$(XEN_BLKTAP2)/control/.libs -lblktapctl
-+LDLIBS_libblktapctl = $(XEN_BLKTAP2)/control/.libs/libblktapctl$(libextension)
-+SHLIB_libblktapctl  = -Wl,-rpath-link=$(XEN_BLKTAP2)/control/.libs
+ SHDEPS_libblktapctl =
+-LDLIBS_libblktapctl = $(SHDEPS_libblktapctl) $(XEN_BLKTAP2)/control/libblktapctl$(libextension)
+-SHLIB_libblktapctl  = $(SHDEPS_libblktapctl) -Wl,-rpath-link=$(XEN_BLKTAP2)/control
++LDLIBS_libblktapctl = $(SHDEPS_libblktapctl) $(XEN_BLKTAP2)/control/.libs/libblktapctl$(libextension)
++SHLIB_libblktapctl  = $(SHDEPS_libblktapctl) -Wl,-rpath-link=$(XEN_BLKTAP2)/control/.libs
  else
  CFLAGS_libblktapctl =
- LDLIBS_libblktapctl =
+ SHDEPS_libblktapctl =
 diff --git a/tools/libxl/libxl_blktap2.c b/tools/libxl/libxl_blktap2.c
-index 2053403..9a0641b 100644
+index 5c9a0a2..ed1ef20 100644
 --- a/tools/libxl/libxl_blktap2.c
 +++ b/tools/libxl/libxl_blktap2.c
 @@ -29,20 +29,15 @@ char *libxl__blktap_devpath(libxl__gc *gc,
@@ -477,12 +527,12 @@ index 2053403..9a0641b 100644
      type = libxl__device_disk_string_of_format(format);
 -    err = tap_ctl_find(type, disk, &tap);
 -    if (err == 0) {
--        devname = libxl__sprintf(gc, "/dev/xen/blktap-2/tapdev%d", tap.minor);
+-        devname = GCSPRINTF("/dev/xen/blktap-2/tapdev%d", tap.minor);
 -        if (devname)
 -            return devname;
 -    }
  
-     params = libxl__sprintf(gc, "%s:%s", type, disk);
+     params = GCSPRINTF("%s:%s", type, disk);
 -    err = tap_ctl_create(params, &devname);
 +    fprintf(stderr, "DEBUG %s %d %s\n",__func__,__LINE__,params);
 +    err = tap_ctl_create(params, &devname, 0, -1, 0, 0);
@@ -491,7 +541,7 @@ index 2053403..9a0641b 100644
          libxl__ptr_add(gc, devname);
          return devname;
      }
-@@ -55,7 +50,10 @@ int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
+@@ -56,7 +51,10 @@ int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
  {
      char *type, *disk;
      int err;
@@ -503,7 +553,7 @@ index 2053403..9a0641b 100644
  
      type = libxl__strdup(gc, params);
  
-@@ -65,19 +63,34 @@ int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
+@@ -66,19 +64,34 @@ int libxl__device_destroy_tapdisk(libxl__gc *gc, const char *params)
          return ERROR_INVAL;
      }
  
@@ -547,7 +597,7 @@ index 2053403..9a0641b 100644
 2.1.4
 
 
-From ad3883a095ea4d957e8461adb511d222b04562d3 Mon Sep 17 00:00:00 2001
+From f5127d1d37405d6bebfb0d501c64fd303d9bdd78 Mon Sep 17 00:00:00 2001
 From: Julien Grall <julien.grall@linaro.org>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] WORKAROUND: arm64: Fixup PSR
@@ -557,10 +607,10 @@ Subject: [PATCH] WORKAROUND: arm64: Fixup PSR
  1 file changed, 9 insertions(+)
 
 diff --git a/xen/include/public/arch-arm.h b/xen/include/public/arch-arm.h
-index 3c365f3..ef033c2 100644
+index 870bc3b..efa618a 100644
 --- a/xen/include/public/arch-arm.h
 +++ b/xen/include/public/arch-arm.h
-@@ -364,6 +364,15 @@ typedef uint64_t xen_callback_t;
+@@ -361,6 +361,15 @@ typedef uint64_t xen_callback_t;
  #define PSR_MODE_SYS 0x1f
  
  /* 64 bit modes */
@@ -580,29 +630,21 @@ index 3c365f3..ef033c2 100644
 2.1.4
 
 
-From ed203914843b6208b608218ee7cb5bc5321619eb Mon Sep 17 00:00:00 2001
+From a659db20582fac88b2ab86d2b161a09c88a36ad8 Mon Sep 17 00:00:00 2001
 From: Stefano Stabellini <stefano.stabellini@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] xen/arm: support compressed kernels
 
 Signed-off-by: Stefano Stabellini <stefano.stabellini@eu.citrix.com>
 ---
- xen/arch/arm/kernel.c | 156 ++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 156 insertions(+)
+ xen/arch/arm/kernel.c | 155 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 155 insertions(+)
 
 diff --git a/xen/arch/arm/kernel.c b/xen/arch/arm/kernel.c
-index f641b12..35692e1 100644
+index 9871bd9..51e04f0 100644
 --- a/xen/arch/arm/kernel.c
 +++ b/xen/arch/arm/kernel.c
-@@ -13,6 +13,7 @@
- #include <asm/byteorder.h>
- #include <asm/setup.h>
- #include <xen/libfdt/libfdt.h>
-+#include <xen/vmap.h>
- 
- #include "kernel.h"
- 
-@@ -258,6 +259,122 @@ static int kernel_uimage_probe(struct kernel_info *info,
+@@ -327,6 +327,122 @@ static __init int kernel_decompress(struct bootmodule *mod)
  }
  
  #ifdef CONFIG_ARM_64
@@ -725,7 +767,7 @@ index f641b12..35692e1 100644
  /*
   * Check if the image is a 64-bit Image.
   */
-@@ -310,6 +427,43 @@ static int kernel_zimage64_probe(struct kernel_info *info,
+@@ -379,6 +495,43 @@ static int kernel_zimage64_probe(struct kernel_info *info,
  
      return 0;
  }
@@ -769,1033 +811,15 @@ index f641b12..35692e1 100644
  #endif
  
  /*
-@@ -466,6 +620,8 @@ int kernel_probe(struct kernel_info *info)
+@@ -536,6 +689,8 @@ int kernel_probe(struct kernel_info *info)
  #ifdef CONFIG_ARM_64
-     rc = kernel_zimage64_probe(info, start, size);
+     rc = kernel_zimage64_probe(info, mod->start, mod->size);
      if (rc < 0)
 +        rc = kernel_zimage64_compressed_probe(info, start, size);
 +    if (rc < 0)
  #endif
-         rc = kernel_uimage_probe(info, start, size);
+         rc = kernel_uimage_probe(info, mod->start, mod->size);
      if (rc < 0)
--- 
-2.1.4
-
-
-From f6021e0d6624131a016e7bd2d0a6c5d3e0bb5e3c Mon Sep 17 00:00:00 2001
-From: David Vrabel <david.vrabel@citrix.com>
-Date: Fri, 20 Nov 2015 11:59:05 -0500
-Subject: [PATCH] xen: Add RING_COPY_REQUEST()
-
-Using RING_GET_REQUEST() on a shared ring is easy to use incorrectly
-(i.e., by not considering that the other end may alter the data in the
-shared ring while it is being inspected).  Safe usage of a request
-generally requires taking a local copy.
-
-Provide a RING_COPY_REQUEST() macro to use instead of
-RING_GET_REQUEST() and an open-coded memcpy().  This takes care of
-ensuring that the copy is done correctly regardless of any possible
-compiler optimizations.
-
-Use a volatile source to prevent the compiler from reordering or
-omitting the copy.
-
-This is part of XSA155.
-
-Signed-off-by: David Vrabel <david.vrabel@citrix.com>
-Signed-off-by: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
----
- xen/include/public/io/ring.h | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
-
-diff --git a/xen/include/public/io/ring.h b/xen/include/public/io/ring.h
-index ba9401b..801c0da 100644
---- a/xen/include/public/io/ring.h
-+++ b/xen/include/public/io/ring.h
-@@ -212,6 +212,20 @@ typedef struct __name##_back_ring __name##_back_ring_t
- #define RING_GET_REQUEST(_r, _idx)                                      \
-     (&((_r)->sring->ring[((_idx) & (RING_SIZE(_r) - 1))].req))
- 
-+/*
-+ * Get a local copy of a request.
-+ *
-+ * Use this in preference to RING_GET_REQUEST() so all processing is
-+ * done on a local copy that cannot be modified by the other end.
-+ *
-+ * Note that https://gcc.gnu.org/bugzilla/show_bug.cgi?id=58145 may cause this
-+ * to be ineffective where _req is a struct which consists of only bitfields.
-+ */
-+#define RING_COPY_REQUEST(_r, _idx, _req) do {				\
-+	/* Use volatile to force the copy into _req. */			\
-+	*(_req) = *(volatile typeof(_req))RING_GET_REQUEST(_r, _idx);	\
-+} while (0)
-+
- #define RING_GET_RESPONSE(_r, _idx)                                     \
-     (&((_r)->sring->ring[((_idx) & (RING_SIZE(_r) - 1))].rsp))
- 
--- 
-2.1.4
-
-
-From cb292ebd915faa5f00e05293b864bd7f422c8b97 Mon Sep 17 00:00:00 2001
-From: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
-Date: Fri, 20 Nov 2015 12:22:14 -0500
-Subject: [PATCH] libvchan: Read prod/cons only once.
-
-We must ensure that the prod/cons are only read once and that
-the compiler won't try to optimize the reads. That is split
-the read of these in multiple instructions influencing later
-branch code. As such insert barriers when fetching the cons
-and prod index.
-
-This is part of XSA155.
-
-Signed-off-by: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
----
- tools/libvchan/io.c | 2 ++
- 1 file changed, 2 insertions(+)
-
-diff --git a/tools/libvchan/io.c b/tools/libvchan/io.c
-index 8a9629b..381cc05 100644
---- a/tools/libvchan/io.c
-+++ b/tools/libvchan/io.c
-@@ -117,6 +117,7 @@ static inline int send_notify(struct libxenvchan *ctrl, uint8_t bit)
- static inline int raw_get_data_ready(struct libxenvchan *ctrl)
- {
- 	uint32_t ready = rd_prod(ctrl) - rd_cons(ctrl);
-+	xen_mb(); /* Ensure 'ready' is read only once. */
- 	if (ready > rd_ring_size(ctrl))
- 		/* We have no way to return errors.  Locking up the ring is
- 		 * better than the alternatives. */
-@@ -158,6 +159,7 @@ int libxenvchan_data_ready(struct libxenvchan *ctrl)
- static inline int raw_get_buffer_space(struct libxenvchan *ctrl)
- {
- 	uint32_t ready = wr_ring_size(ctrl) - (wr_prod(ctrl) - wr_cons(ctrl));
-+	xen_mb(); /* Ensure 'ready' is read only once. */
- 	if (ready > wr_ring_size(ctrl))
- 		/* We have no way to return errors.  Locking up the ring is
- 		 * better than the alternatives. */
--- 
-2.1.4
-
-
-From 07fe9e406b7b485ae1b9f613dc6ed7083f137979 Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Mon, 15 Feb 2016 17:00:46 +0000
-Subject: [PATCH] x86: enforce consistent cachability of MMIO mappings
-
-We've been told that inconsistent cachability between multiple mappings
-of the same page can affect system stability only when the affected
-page is an MMIO one. Since the stale data issue is of no relevance to
-the hypervisor (since all guest memory accesses go through proper
-accessors and validation), handling of RAM pages remains unchanged
-here. Any MMIO mapped by domains however needs to be done consistently
-(all cachable mappings or all uncachable ones), in order to avoid
-Machine Check exceptions. Since converting existing cachable mappings
-to uncachable (at the time an uncachable mapping gets established)
-would in the PV case require tracking all mappings, allow MMIO to only
-get mapped uncachable (UC, UC-, or WC).
-
-This also implies that in the PV case we mustn't use the L1 PTE update
-fast path when cachability flags get altered.
-
-Since in the HVM case at least for now we want to continue honoring
-pinned cachability attributes for pages not mapped by the hypervisor,
-special case handling of r/o MMIO pages (forcing UC) gets added there.
-Arguably the counterpart change to p2m-pt.c may not be necessary, since
-UC- (which already gets enforced there) is probably strict enough.
-
-Note that the shadow code changes include fixing the write protection
-of r/o MMIO ranges: shadow_l1e_remove_flags() and its siblings, other
-than l1e_remove_flags() and alike, return the new PTE (and hence
-ignoring their return values makes them no-ops).
-
-This is XSA-154.
-
-Signed-off-by: Jan Beulich <jbeulich@suse.com>
----
- xen/arch/x86/hvm/mtrr.c        | 11 +++++-
- xen/arch/x86/mm.c              | 78 ++++++++++++++++++++++++++----------------
- xen/arch/x86/mm/p2m-pt.c       |  2 ++
- xen/arch/x86/mm/shadow/multi.c | 32 ++++++++++++-----
- xen/arch/x86/mm/shadow/types.h |  3 ++
- xen/include/asm-x86/page.h     |  3 ++
- 6 files changed, 90 insertions(+), 39 deletions(-)
-
-diff --git a/xen/arch/x86/hvm/mtrr.c b/xen/arch/x86/hvm/mtrr.c
-index aa7adcf..9268dfb 100644
---- a/xen/arch/x86/hvm/mtrr.c
-+++ b/xen/arch/x86/hvm/mtrr.c
-@@ -807,8 +807,17 @@ int epte_get_entry_emt(struct domain *d, unsigned long gfn, mfn_t mfn,
-     if ( v->domain != d )
-         v = d->vcpu ? d->vcpu[0] : NULL;
- 
--    if ( !mfn_valid(mfn_x(mfn)) )
-+    if ( !mfn_valid(mfn_x(mfn)) ||
-+         rangeset_contains_range(mmio_ro_ranges, mfn_x(mfn),
-+                                 mfn_x(mfn) + (1UL << order) - 1) )
-+    {
-+        *ipat = 1;
-         return MTRR_TYPE_UNCACHABLE;
-+    }
-+
-+    if ( rangeset_overlaps_range(mmio_ro_ranges, mfn_x(mfn),
-+                                 mfn_x(mfn) + (1UL << order) - 1) )
-+        return -1;
- 
-     switch ( hvm_get_mem_pinned_cacheattr(d, gfn, order, &type) )
-     {
-diff --git a/xen/arch/x86/mm.c b/xen/arch/x86/mm.c
-index 854a635..fc20844 100644
---- a/xen/arch/x86/mm.c
-+++ b/xen/arch/x86/mm.c
-@@ -799,10 +799,7 @@ get_page_from_l1e(
-     if ( !mfn_valid(mfn) ||
-          (real_pg_owner = page_get_owner_and_reference(page)) == dom_io )
-     {
--#ifndef NDEBUG
--        const unsigned long *ro_map;
--        unsigned int seg, bdf;
--#endif
-+        int flip = 0;
- 
-         /* Only needed the reference to confirm dom_io ownership. */
-         if ( mfn_valid(mfn) )
-@@ -836,24 +833,42 @@ get_page_from_l1e(
-             return -EINVAL;
-         }
- 
--        if ( !(l1f & _PAGE_RW) ||
--             !rangeset_contains_singleton(mmio_ro_ranges, mfn) )
--            return 0;
-+        if ( (l1f & _PAGE_RW) &&
-+             rangeset_contains_singleton(mmio_ro_ranges, mfn) )
-+        {
- #ifndef NDEBUG
--        if ( !pci_mmcfg_decode(mfn, &seg, &bdf) ||
--             ((ro_map = pci_get_ro_map(seg)) != NULL &&
--              test_bit(bdf, ro_map)) )
--            printk(XENLOG_G_WARNING
--                   "d%d: Forcing read-only access to MFN %lx\n",
--                   l1e_owner->domain_id, mfn);
--        else
--            rangeset_report_ranges(mmio_ro_ranges, 0, ~0UL,
--                                   print_mmio_emul_range,
--                                   &(struct mmio_emul_range_ctxt){
--                                      .d = l1e_owner,
--                                      .mfn = mfn });
-+            const unsigned long *ro_map;
-+            unsigned int seg, bdf;
-+
-+            if ( !pci_mmcfg_decode(mfn, &seg, &bdf) ||
-+                 ((ro_map = pci_get_ro_map(seg)) != NULL &&
-+                  test_bit(bdf, ro_map)) )
-+                printk(XENLOG_G_WARNING
-+                       "d%d: Forcing read-only access to MFN %lx\n",
-+                       l1e_owner->domain_id, mfn);
-+            else
-+                rangeset_report_ranges(mmio_ro_ranges, 0, ~0UL,
-+                                       print_mmio_emul_range,
-+                                       &(struct mmio_emul_range_ctxt){
-+                                           .d = l1e_owner,
-+                                           .mfn = mfn });
- #endif
--        return 1;
-+            flip = _PAGE_RW;
-+        }
-+
-+        /* Don't allow MMIO pages to be mapped cachable. */
-+        switch ( l1f & PAGE_CACHE_ATTRS )
-+        {
-+        case 0: /* WB */
-+            flip |= _PAGE_PWT | _PAGE_PCD;
-+            break;
-+        case _PAGE_PWT: /* WT */
-+        case _PAGE_PWT | _PAGE_PAT: /* WP */
-+            flip |= _PAGE_PCD | (l1f & _PAGE_PAT);
-+            break;
-+        }
-+
-+        return flip;
-     }
- 
-     if ( unlikely( (real_pg_owner != pg_owner) &&
-@@ -1243,8 +1258,9 @@ static int alloc_l1_table(struct page_info *page)
-                 goto fail;
-             case 0:
-                 break;
--            case 1:
--                l1e_remove_flags(pl1e[i], _PAGE_RW);
-+            case _PAGE_RW ... _PAGE_RW | PAGE_CACHE_ATTRS:
-+                ASSERT(!(ret & ~(_PAGE_RW | PAGE_CACHE_ATTRS)));
-+                l1e_flip_flags(pl1e[i], ret);
-                 break;
-             }
- 
-@@ -1759,8 +1775,9 @@ static int mod_l1_entry(l1_pgentry_t *pl1e, l1_pgentry_t nl1e,
-             return -EINVAL;
-         }
- 
--        /* Fast path for identical mapping, r/w and presence. */
--        if ( !l1e_has_changed(ol1e, nl1e, _PAGE_RW | _PAGE_PRESENT) )
-+        /* Fast path for identical mapping, r/w, presence, and cachability. */
-+        if ( !l1e_has_changed(ol1e, nl1e,
-+                              PAGE_CACHE_ATTRS | _PAGE_RW | _PAGE_PRESENT) )
-         {
-             adjust_guest_l1e(nl1e, pt_dom);
-             if ( UPDATE_ENTRY(l1, pl1e, ol1e, nl1e, gl1mfn, pt_vcpu,
-@@ -1783,8 +1800,9 @@ static int mod_l1_entry(l1_pgentry_t *pl1e, l1_pgentry_t nl1e,
-             return rc;
-         case 0:
-             break;
--        case 1:
--            l1e_remove_flags(nl1e, _PAGE_RW);
-+        case _PAGE_RW ... _PAGE_RW | PAGE_CACHE_ATTRS:
-+            ASSERT(!(rc & ~(_PAGE_RW | PAGE_CACHE_ATTRS)));
-+            l1e_flip_flags(nl1e, rc);
-             rc = 0;
-             break;
-         }
-@@ -5000,6 +5018,7 @@ static int ptwr_emulated_update(
-     l1_pgentry_t pte, ol1e, nl1e, *pl1e;
-     struct vcpu *v = current;
-     struct domain *d = v->domain;
-+    int ret;
- 
-     /* Only allow naturally-aligned stores within the original %cr2 page. */
-     if ( unlikely(((addr^ptwr_ctxt->cr2) & PAGE_MASK) || (addr & (bytes-1))) )
-@@ -5047,7 +5066,7 @@ static int ptwr_emulated_update(
- 
-     /* Check the new PTE. */
-     nl1e = l1e_from_intpte(val);
--    switch ( get_page_from_l1e(nl1e, d, d) )
-+    switch ( ret = get_page_from_l1e(nl1e, d, d) )
-     {
-     default:
-         if ( is_pv_32bit_domain(d) && (bytes == 4) && (unaligned_addr & 4) &&
-@@ -5071,8 +5090,9 @@ static int ptwr_emulated_update(
-         break;
-     case 0:
-         break;
--    case 1:
--        l1e_remove_flags(nl1e, _PAGE_RW);
-+    case _PAGE_RW ... _PAGE_RW | PAGE_CACHE_ATTRS:
-+        ASSERT(!(ret & ~(_PAGE_RW | PAGE_CACHE_ATTRS)));
-+        l1e_flip_flags(nl1e, ret);
-         break;
-     }
- 
-diff --git a/xen/arch/x86/mm/p2m-pt.c b/xen/arch/x86/mm/p2m-pt.c
-index 709920a..ab1f35d 100644
---- a/xen/arch/x86/mm/p2m-pt.c
-+++ b/xen/arch/x86/mm/p2m-pt.c
-@@ -107,6 +107,8 @@ static unsigned long p2m_type_to_flags(p2m_type_t t, mfn_t mfn)
-     case p2m_mmio_direct:
-         if ( !rangeset_contains_singleton(mmio_ro_ranges, mfn_x(mfn)) )
-             flags |= _PAGE_RW;
-+        else
-+            flags |= _PAGE_PWT;
-         return flags | P2M_BASE_FLAGS | _PAGE_PCD;
-     }
- }
-diff --git a/xen/arch/x86/mm/shadow/multi.c b/xen/arch/x86/mm/shadow/multi.c
-index 22081a1..43c9488 100644
---- a/xen/arch/x86/mm/shadow/multi.c
-+++ b/xen/arch/x86/mm/shadow/multi.c
-@@ -519,6 +519,7 @@ _sh_propagate(struct vcpu *v,
-     gfn_t target_gfn = guest_l1e_get_gfn(guest_entry);
-     u32 pass_thru_flags;
-     u32 gflags, sflags;
-+    bool_t mmio_mfn;
- 
-     /* We don't shadow PAE l3s */
-     ASSERT(GUEST_PAGING_LEVELS > 3 || level != 3);
-@@ -559,7 +560,10 @@ _sh_propagate(struct vcpu *v,
-     // mfn means that we can not usefully shadow anything, and so we
-     // return early.
-     //
--    if ( !mfn_valid(target_mfn)
-+    mmio_mfn = !mfn_valid(target_mfn)
-+               || (level == 1
-+                   && page_get_owner(mfn_to_page(target_mfn)) == dom_io);
-+    if ( mmio_mfn
-          && !(level == 1 && (!shadow_mode_refcounts(d)
-                              || p2mt == p2m_mmio_direct)) )
-     {
-@@ -577,7 +581,7 @@ _sh_propagate(struct vcpu *v,
-                        _PAGE_RW | _PAGE_PRESENT);
-     if ( guest_supports_nx(v) )
-         pass_thru_flags |= _PAGE_NX_BIT;
--    if ( !shadow_mode_refcounts(d) && !mfn_valid(target_mfn) )
-+    if ( level == 1 && !shadow_mode_refcounts(d) && mmio_mfn )
-         pass_thru_flags |= _PAGE_PAT | _PAGE_PCD | _PAGE_PWT;
-     sflags = gflags & pass_thru_flags;
- 
-@@ -676,10 +680,14 @@ _sh_propagate(struct vcpu *v,
-     }
- 
-     /* Read-only memory */
--    if ( p2m_is_readonly(p2mt) ||
--         (p2mt == p2m_mmio_direct &&
--          rangeset_contains_singleton(mmio_ro_ranges, mfn_x(target_mfn))) )
-+    if ( p2m_is_readonly(p2mt) )
-         sflags &= ~_PAGE_RW;
-+    else if ( p2mt == p2m_mmio_direct &&
-+              rangeset_contains_singleton(mmio_ro_ranges, mfn_x(target_mfn)) )
-+    {
-+        sflags &= ~(_PAGE_RW | _PAGE_PAT);
-+        sflags |= _PAGE_PCD | _PAGE_PWT;
-+    }
- 
-     // protect guest page tables
-     //
-@@ -1185,22 +1193,28 @@ static int shadow_set_l1e(struct domain *d,
-          && !sh_l1e_is_magic(new_sl1e) )
-     {
-         /* About to install a new reference */
--        if ( shadow_mode_refcounts(d) ) {
-+        if ( shadow_mode_refcounts(d) )
-+        {
-+#define PAGE_FLIPPABLE (_PAGE_RW | _PAGE_PWT | _PAGE_PCD | _PAGE_PAT)
-+            int rc;
-+
-             TRACE_SHADOW_PATH_FLAG(TRCE_SFLAG_SHADOW_L1_GET_REF);
--            switch ( shadow_get_page_from_l1e(new_sl1e, d, new_type) )
-+            switch ( rc = shadow_get_page_from_l1e(new_sl1e, d, new_type) )
-             {
-             default:
-                 /* Doesn't look like a pagetable. */
-                 flags |= SHADOW_SET_ERROR;
-                 new_sl1e = shadow_l1e_empty();
-                 break;
--            case 1:
--                shadow_l1e_remove_flags(new_sl1e, _PAGE_RW);
-+            case PAGE_FLIPPABLE & -PAGE_FLIPPABLE ... PAGE_FLIPPABLE:
-+                ASSERT(!(rc & ~PAGE_FLIPPABLE));
-+                new_sl1e = shadow_l1e_flip_flags(new_sl1e, rc);
-                 /* fall through */
-             case 0:
-                 shadow_vram_get_l1e(new_sl1e, sl1e, sl1mfn, d);
-                 break;
-             }
-+#undef PAGE_FLIPPABLE
-         }
-     }
- 
-diff --git a/xen/arch/x86/mm/shadow/types.h b/xen/arch/x86/mm/shadow/types.h
-index 9bc369f..6d0562e 100644
---- a/xen/arch/x86/mm/shadow/types.h
-+++ b/xen/arch/x86/mm/shadow/types.h
-@@ -99,6 +99,9 @@ static inline u32 shadow_l4e_get_flags(shadow_l4e_t sl4e)
- static inline shadow_l1e_t
- shadow_l1e_remove_flags(shadow_l1e_t sl1e, u32 flags)
- { l1e_remove_flags(sl1e, flags); return sl1e; }
-+static inline shadow_l1e_t
-+shadow_l1e_flip_flags(shadow_l1e_t sl1e, u32 flags)
-+{ l1e_flip_flags(sl1e, flags); return sl1e; }
- 
- static inline shadow_l1e_t shadow_l1e_empty(void)
- { return l1e_empty(); }
-diff --git a/xen/include/asm-x86/page.h b/xen/include/asm-x86/page.h
-index 87b3341..66b611c 100644
---- a/xen/include/asm-x86/page.h
-+++ b/xen/include/asm-x86/page.h
-@@ -157,6 +157,9 @@ static inline l4_pgentry_t l4e_from_paddr(paddr_t pa, unsigned int flags)
- #define l3e_remove_flags(x, flags) ((x).l3 &= ~put_pte_flags(flags))
- #define l4e_remove_flags(x, flags) ((x).l4 &= ~put_pte_flags(flags))
- 
-+/* Flip flags in an existing L1 PTE. */
-+#define l1e_flip_flags(x, flags)    ((x).l1 ^= put_pte_flags(flags))
-+
- /* Check if a pte's page mapping or significant access flags have changed. */
- #define l1e_has_changed(x,y,flags) \
-     ( !!(((x).l1 ^ (y).l1) & ((PADDR_MASK&PAGE_MASK)|put_pte_flags(flags))) )
--- 
-2.1.4
-
-
-From 0ecce76266c296059e56c9e89a17c74c357080d0 Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Mon, 15 Feb 2016 17:01:39 +0000
-Subject: [PATCH] x86/VMX: sanitize rIP before re-entering guest
-
-... to prevent guest user mode arranging for a guest crash (due to
-failed VM entry). (On the AMD system I checked, hardware is doing
-exactly the canonicalization being added here.)
-
-Note that fixing this in an architecturally correct way would be quite
-a bit more involved: Making the x86 instruction emulator check all
-branch targets for validity, plus dealing with invalid rIP resulting
-from update_guest_eip() or incoming directly during a VM exit. The only
-way to get the latter right would be by not having hardware do the
-injection.
-
-Note further that there are a two early returns from
-vmx_vmexit_handler(): One (through vmx_failed_vmentry()) leads to
-domain_crash() anyway, and the other covers real mode only and can
-neither occur with a non-canonical rIP nor result in an altered rIP,
-so we don't need to force those paths through the checking logic.
-
-This is XSA-170.
-
-Signed-off-by: Jan Beulich <jbeulich@suse.com>
-Reviewed-by: Andrew Cooper <andrew.cooper3@citrix.com>
-Tested-by: Andrew Cooper <andrew.cooper3@citrix.com>
----
- xen/arch/x86/hvm/vmx/vmx.c | 37 ++++++++++++++++++++++++++++++++++++-
- 1 file changed, 36 insertions(+), 1 deletion(-)
-
-diff --git a/xen/arch/x86/hvm/vmx/vmx.c b/xen/arch/x86/hvm/vmx/vmx.c
-index 404dcfe..d75d024 100644
---- a/xen/arch/x86/hvm/vmx/vmx.c
-+++ b/xen/arch/x86/hvm/vmx/vmx.c
-@@ -2879,7 +2879,7 @@ static int vmx_handle_apic_write(void)
- void vmx_vmexit_handler(struct cpu_user_regs *regs)
- {
-     unsigned long exit_qualification, exit_reason, idtv_info, intr_info = 0;
--    unsigned int vector = 0;
-+    unsigned int vector = 0, mode;
-     struct vcpu *v = current;
- 
-     __vmread(GUEST_RIP,    &regs->rip);
-@@ -3468,6 +3468,41 @@ void vmx_vmexit_handler(struct cpu_user_regs *regs)
- out:
-     if ( nestedhvm_vcpu_in_guestmode(v) )
-         nvmx_idtv_handling();
-+
-+    /*
-+     * VM entry will fail (causing the guest to get crashed) if rIP (and
-+     * rFLAGS, but we don't have an issue there) doesn't meet certain
-+     * criteria. As we must not allow less than fully privileged mode to have
-+     * such an effect on the domain, we correct rIP in that case (accepting
-+     * this not being architecturally correct behavior, as the injected #GP
-+     * fault will then not see the correct [invalid] return address).
-+     * And since we know the guest will crash, we crash it right away if it
-+     * already is in most privileged mode.
-+     */
-+    mode = vmx_guest_x86_mode(v);
-+    if ( mode == 8 ? !is_canonical_address(regs->rip)
-+                   : regs->rip != regs->_eip )
-+    {
-+        struct segment_register ss;
-+
-+        gprintk(XENLOG_WARNING, "Bad rIP %lx for mode %u\n", regs->rip, mode);
-+
-+        vmx_get_segment_register(v, x86_seg_ss, &ss);
-+        if ( ss.attr.fields.dpl )
-+        {
-+            __vmread(VM_ENTRY_INTR_INFO, &intr_info);
-+            if ( !(intr_info & INTR_INFO_VALID_MASK) )
-+                hvm_inject_hw_exception(TRAP_gp_fault, 0);
-+            /* Need to fix rIP nevertheless. */
-+            if ( mode == 8 )
-+                regs->rip = (long)(regs->rip << (64 - VADDR_BITS)) >>
-+                            (64 - VADDR_BITS);
-+            else
-+                regs->rip = regs->_eip;
-+        }
-+        else
-+            domain_crash(v->domain);
-+    }
- }
- 
- void vmx_vmenter_helper(const struct cpu_user_regs *regs)
--- 
-2.1.4
-
-
-From 7faa34b652286f64360928e2b48a5bf385ce8916 Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@citrix.com>
-Date: Tue, 29 Mar 2016 11:02:43 +0100
-Subject: [PATCH] x86: fix information leak on AMD CPUs
-
-The fix for XSA-52 was wrong, and so was the change synchronizing that
-new behavior to the FXRSTOR logic: AMD's manuals explictly state that
-writes to the ES bit are ignored, and it instead gets calculated from
-the exception and mask bits (it gets set whenever there is an unmasked
-exception, and cleared otherwise). Hence we need to follow that model
-in our workaround.
-
-This is XSA-172.
-
-Signed-off-by: Jan Beulich <jbeulich@suse.com>
-Reviewed-by: Andrew Cooper <andrew.cooper3@citrix.com>
----
- xen/arch/x86/i387.c   | 2 +-
- xen/arch/x86/xstate.c | 2 +-
- 2 files changed, 2 insertions(+), 2 deletions(-)
-
-diff --git a/xen/arch/x86/i387.c b/xen/arch/x86/i387.c
-index 57eae28..39b8456 100644
---- a/xen/arch/x86/i387.c
-+++ b/xen/arch/x86/i387.c
-@@ -49,7 +49,7 @@ static inline void fpu_fxrstor(struct vcpu *v)
-      * sometimes new user value. Both should be ok. Use the FPU saved
-      * data block as a safe address because it should be in L1.
-      */
--    if ( !(fpu_ctxt->fsw & 0x0080) &&
-+    if ( !(fpu_ctxt->fsw & ~fpu_ctxt->fcw & 0x003f) &&
-          boot_cpu_data.x86_vendor == X86_VENDOR_AMD )
-     {
-         asm volatile ( "fnclex\n\t"
-diff --git a/xen/arch/x86/xstate.c b/xen/arch/x86/xstate.c
-index d5f5e3b..d66fc3b 100644
---- a/xen/arch/x86/xstate.c
-+++ b/xen/arch/x86/xstate.c
-@@ -158,7 +158,7 @@ void xrstor(struct vcpu *v, uint64_t mask)
-      * data block as a safe address because it should be in L1.
-      */
-     if ( (mask & ptr->xsave_hdr.xstate_bv & XSTATE_FP) &&
--         !(ptr->fpu_sse.fsw & 0x0080) &&
-+         !(ptr->fpu_sse.fsw & ~ptr->fpu_sse.fcw & 0x003f) &&
-          boot_cpu_data.x86_vendor == X86_VENDOR_AMD )
-         asm volatile ( "fnclex\n\t"        /* clear exceptions */
-                        "ffree %%st(7)\n\t" /* clear stack tag */
--- 
-2.1.4
-
-
-From f512e09b55cab87d8778e369a375a18d9c143634 Mon Sep 17 00:00:00 2001
-From: Tim Deegan <tim@xen.org>
-Date: Wed, 16 Mar 2016 16:51:27 +0000
-Subject: [PATCH] x86: limit GFNs to 32 bits for shadowed superpages.
-
-Superpage shadows store the shadowed GFN in the backpointer field,
-which for non-BIGMEM builds is 32 bits wide.  Shadowing a superpage
-mapping of a guest-physical address above 2^44 would lead to the GFN
-being truncated there, and a crash when we come to remove the shadow
-from the hash table.
-
-Track the valid width of a GFN for each guest, including reporting it
-through CPUID, and enforce it in the shadow pagetables.  Set the
-maximum witth to 32 for guests where this truncation could occur.
-
-This is XSA-173.
-
-Signed-off-by: Tim Deegan <tim@xen.org>
-Signed-off-by: Jan Beulich <jbeulich@suse.com>
-
-rted-by: Ling Liu <liuling-it@360.cn>
----
- xen/arch/x86/cpu/common.c         | 10 +++++++---
- xen/arch/x86/hvm/hvm.c            |  3 +--
- xen/arch/x86/mm/guest_walk.c      | 26 +++++++++++++-------------
- xen/arch/x86/mm/hap/hap.c         |  2 ++
- xen/arch/x86/mm/shadow/common.c   | 10 ++++++++++
- xen/arch/x86/mm/shadow/multi.c    |  3 ++-
- xen/include/asm-x86/domain.h      |  3 +++
- xen/include/asm-x86/guest_pt.h    | 18 ++++++++++--------
- xen/include/asm-x86/processor.h   |  2 ++
- xen/include/asm-x86/x86_64/page.h |  6 ++++++
- 10 files changed, 56 insertions(+), 27 deletions(-)
-
-diff --git a/xen/arch/x86/cpu/common.c b/xen/arch/x86/cpu/common.c
-index 35ef21b..528c283 100644
---- a/xen/arch/x86/cpu/common.c
-+++ b/xen/arch/x86/cpu/common.c
-@@ -38,6 +38,7 @@ integer_param("cpuid_mask_ext_edx", opt_cpuid_mask_ext_edx);
- const struct cpu_dev *__read_mostly cpu_devs[X86_VENDOR_NUM] = {};
- 
- unsigned int paddr_bits __read_mostly = 36;
-+unsigned int hap_paddr_bits __read_mostly = 36;
- 
- /*
-  * Default host IA32_CR_PAT value to cover all memory types.
-@@ -211,7 +212,7 @@ static void __init early_cpu_detect(void)
- 
- static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
- {
--	u32 tfms, capability, excap, ebx;
-+	u32 tfms, capability, excap, ebx, eax;
- 
- 	/* Get vendor name */
- 	cpuid(0x00000000, &c->cpuid_level,
-@@ -248,8 +249,11 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
- 		}
- 		if ( c->extended_cpuid_level >= 0x80000004 )
- 			get_model_name(c); /* Default name */
--		if ( c->extended_cpuid_level >= 0x80000008 )
--			paddr_bits = cpuid_eax(0x80000008) & 0xff;
-+		if ( c->extended_cpuid_level >= 0x80000008 ) {
-+			eax = cpuid_eax(0x80000008);
-+			paddr_bits = eax & 0xff;
-+			hap_paddr_bits = ((eax >> 16) & 0xff) ?: paddr_bits;
-+		}
- 	}
- 
- 	/* Might lift BIOS max_leaf=3 limit. */
-diff --git a/xen/arch/x86/hvm/hvm.c b/xen/arch/x86/hvm/hvm.c
-index 186e01e..9ca8bd9 100644
---- a/xen/arch/x86/hvm/hvm.c
-+++ b/xen/arch/x86/hvm/hvm.c
-@@ -4559,8 +4559,7 @@ void hvm_cpuid(unsigned int input, unsigned int *eax, unsigned int *ebx,
-         break;
- 
-     case 0x80000008:
--        count = cpuid_eax(0x80000008);
--        count = (count >> 16) & 0xff ?: count & 0xff;
-+        count = d->arch.paging.gfn_bits + PAGE_SHIFT;
-         if ( (*eax & 0xff) > count )
-             *eax = (*eax & ~0xff) | count;
- 
-diff --git a/xen/arch/x86/mm/guest_walk.c b/xen/arch/x86/mm/guest_walk.c
-index 773454d..06543d3 100644
---- a/xen/arch/x86/mm/guest_walk.c
-+++ b/xen/arch/x86/mm/guest_walk.c
-@@ -93,6 +93,12 @@ void *map_domain_gfn(struct p2m_domain *p2m, gfn_t gfn, mfn_t *mfn,
-     struct page_info *page;
-     void *map;
- 
-+    if ( gfn_x(gfn) >> p2m->domain->arch.paging.gfn_bits )
-+    {
-+        *rc = _PAGE_INVALID_BIT;
-+        return NULL;
-+    }
-+
-     /* Translate the gfn, unsharing if shared */
-     page = get_page_from_gfn_p2m(p2m->domain, p2m, gfn_x(gfn), p2mt, NULL,
-                                  q);
-@@ -326,20 +332,8 @@ guest_walk_tables(struct vcpu *v, struct p2m_domain *p2m,
-             flags &= ~_PAGE_PAT;
- 
-         if ( gfn_x(start) & GUEST_L2_GFN_MASK & ~0x1 )
--        {
--#if GUEST_PAGING_LEVELS == 2
--            /*
--             * Note that _PAGE_INVALID_BITS is zero in this case, yielding a
--             * no-op here.
--             *
--             * Architecturally, the walk should fail if bit 21 is set (others
--             * aren't being checked at least in PSE36 mode), but we'll ignore
--             * this here in order to avoid specifying a non-natural, non-zero
--             * _PAGE_INVALID_BITS value just for that case.
--             */
--#endif
-             rc |= _PAGE_INVALID_BITS;
--        }
-+
-         /* Increment the pfn by the right number of 4k pages.  
-          * Mask out PAT and invalid bits. */
-         start = _gfn((gfn_x(start) & ~GUEST_L2_GFN_MASK) +
-@@ -422,5 +416,11 @@ set_ad:
-         put_page(mfn_to_page(mfn_x(gw->l1mfn)));
-     }
- 
-+    /* If this guest has a restricted physical address space then the
-+     * target GFN must fit within it. */
-+    if ( !(rc & _PAGE_PRESENT)
-+         && gfn_x(guest_l1e_get_gfn(gw->l1e)) >> d->arch.paging.gfn_bits )
-+        rc |= _PAGE_INVALID_BITS;
-+
-     return rc;
- }
-diff --git a/xen/arch/x86/mm/hap/hap.c b/xen/arch/x86/mm/hap/hap.c
-index e9c0080..2bbea4a 100644
---- a/xen/arch/x86/mm/hap/hap.c
-+++ b/xen/arch/x86/mm/hap/hap.c
-@@ -448,6 +448,8 @@ void hap_domain_init(struct domain *d)
- {
-     INIT_PAGE_LIST_HEAD(&d->arch.paging.hap.freelist);
- 
-+    d->arch.paging.gfn_bits = hap_paddr_bits - PAGE_SHIFT;
-+
-     /* Use HAP logdirty mechanism. */
-     paging_log_dirty_init(d, hap_enable_log_dirty,
-                           hap_disable_log_dirty,
-diff --git a/xen/arch/x86/mm/shadow/common.c b/xen/arch/x86/mm/shadow/common.c
-index bad8360..98d0d2c 100644
---- a/xen/arch/x86/mm/shadow/common.c
-+++ b/xen/arch/x86/mm/shadow/common.c
-@@ -51,6 +51,16 @@ int shadow_domain_init(struct domain *d, unsigned int domcr_flags)
-     INIT_PAGE_LIST_HEAD(&d->arch.paging.shadow.freelist);
-     INIT_PAGE_LIST_HEAD(&d->arch.paging.shadow.pinned_shadows);
- 
-+    d->arch.paging.gfn_bits = paddr_bits - PAGE_SHIFT;
-+#ifndef CONFIG_BIGMEM
-+    /*
-+     * Shadowed superpages store GFNs in 32-bit page_info fields.
-+     * Note that we cannot use guest_supports_superpages() here.
-+     */
-+    if ( !is_pv_domain(d) || opt_allow_superpage )
-+        d->arch.paging.gfn_bits = 32;
-+#endif
-+
-     /* Use shadow pagetables for log-dirty support */
-     paging_log_dirty_init(d, sh_enable_log_dirty,
-                           sh_disable_log_dirty, sh_clean_dirty_bitmap);
-diff --git a/xen/arch/x86/mm/shadow/multi.c b/xen/arch/x86/mm/shadow/multi.c
-index 43c9488..71477fe 100644
---- a/xen/arch/x86/mm/shadow/multi.c
-+++ b/xen/arch/x86/mm/shadow/multi.c
-@@ -525,7 +525,8 @@ _sh_propagate(struct vcpu *v,
-     ASSERT(GUEST_PAGING_LEVELS > 3 || level != 3);
- 
-     /* Check there's something for the shadows to map to */
--    if ( !p2m_is_valid(p2mt) && !p2m_is_grant(p2mt) )
-+    if ( (!p2m_is_valid(p2mt) && !p2m_is_grant(p2mt))
-+         || gfn_x(target_gfn) >> d->arch.paging.gfn_bits )
-     {
-         *sp = shadow_l1e_empty();
-         goto done;
-diff --git a/xen/include/asm-x86/domain.h b/xen/include/asm-x86/domain.h
-index 0fce09e..7fa1fde 100644
---- a/xen/include/asm-x86/domain.h
-+++ b/xen/include/asm-x86/domain.h
-@@ -193,6 +193,9 @@ struct paging_domain {
-     /* log dirty support */
-     struct log_dirty_domain log_dirty;
- 
-+    /* Number of valid bits in a gfn. */
-+    unsigned int gfn_bits;
-+
-     /* preemption handling */
-     struct {
-         const struct domain *dom;
-diff --git a/xen/include/asm-x86/guest_pt.h b/xen/include/asm-x86/guest_pt.h
-index f8a0d76..b5db401 100644
---- a/xen/include/asm-x86/guest_pt.h
-+++ b/xen/include/asm-x86/guest_pt.h
-@@ -210,15 +210,17 @@ guest_supports_nx(struct vcpu *v)
- }
- 
- 
--/* Some bits are invalid in any pagetable entry. */
--#if GUEST_PAGING_LEVELS == 2
--#define _PAGE_INVALID_BITS (0)
--#elif GUEST_PAGING_LEVELS == 3
--#define _PAGE_INVALID_BITS \
--    get_pte_flags(((1ull<<63) - 1) & ~((1ull<<paddr_bits) - 1))
--#else /* GUEST_PAGING_LEVELS == 4 */
-+/*
-+ * Some bits are invalid in any pagetable entry.
-+ * Normal flags values get represented in 24-bit values (see
-+ * get_pte_flags() and put_pte_flags()), so set bit 24 in
-+ * addition to be able to flag out of range frame numbers.
-+ */
-+#if GUEST_PAGING_LEVELS == 3
- #define _PAGE_INVALID_BITS \
--    get_pte_flags(((1ull<<52) - 1) & ~((1ull<<paddr_bits) - 1))
-+    (_PAGE_INVALID_BIT | get_pte_flags(((1ull << 63) - 1) & ~(PAGE_SIZE - 1)))
-+#else /* 2-level and 4-level */
-+#define _PAGE_INVALID_BITS _PAGE_INVALID_BIT
- #endif
- 
- 
-diff --git a/xen/include/asm-x86/processor.h b/xen/include/asm-x86/processor.h
-index f507f5e..a200470 100644
---- a/xen/include/asm-x86/processor.h
-+++ b/xen/include/asm-x86/processor.h
-@@ -212,6 +212,8 @@ extern u32 cpuid_ext_features;
- 
- /* Maximum width of physical addresses supported by the hardware */
- extern unsigned int paddr_bits;
-+/* Max physical address width supported within HAP guests */
-+extern unsigned int hap_paddr_bits;
- 
- extern const struct x86_cpu_id *x86_match_cpu(const struct x86_cpu_id table[]);
- 
-diff --git a/xen/include/asm-x86/x86_64/page.h b/xen/include/asm-x86/x86_64/page.h
-index 19ab4d0..eb5e2fd 100644
---- a/xen/include/asm-x86/x86_64/page.h
-+++ b/xen/include/asm-x86/x86_64/page.h
-@@ -141,6 +141,12 @@ typedef l4_pgentry_t root_pgentry_t;
- #define _PAGE_GNTTAB (1U<<22)
- 
- /*
-+ * Bit 24 of a 24-bit flag mask!  This is not any bit of a real pte,
-+ * and is only used for signalling in variables that contain flags.
-+ */
-+#define _PAGE_INVALID_BIT (1U<<24)
-+
-+/*
-  * Bit 12 of a 24-bit flag mask. This corresponds to bit 52 of a pte.
-  * This is needed to distinguish between user and kernel PTEs since _PAGE_USER
-  * is asserted for both.
--- 
-2.1.4
-
-
-From beb0471344629a3a844c5741547525cdd1d13e02 Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@citrix.com>
-Date: Thu, 12 May 2016 15:49:18 +0100
-Subject: [PATCH] x86/mm: fully honor PS bits in guest page table walks
-
-In L4 entries it is currently unconditionally reserved (and hence
-should, when set, always result in a reserved bit page fault), and is
-reserved on hardware not supporting 1Gb pages (and hence should, when
-set, similarly cause a reserved bit page fault on such hardware).
-
-This is XSA-176.
-
-Signed-off-by: Jan Beulich <jbeulich@suse.com>
-Reviewed-by: Andrew Cooper <andrew.cooper3@citrix.com>
-Tested-by: Andrew Cooper <andrew.cooper3@citrix.com>
----
- xen/arch/x86/mm/guest_walk.c | 9 ++++++++-
- 1 file changed, 8 insertions(+), 1 deletion(-)
-
-diff --git a/xen/arch/x86/mm/guest_walk.c b/xen/arch/x86/mm/guest_walk.c
-index 06543d3..f64d8ae 100644
---- a/xen/arch/x86/mm/guest_walk.c
-+++ b/xen/arch/x86/mm/guest_walk.c
-@@ -218,6 +218,11 @@ guest_walk_tables(struct vcpu *v, struct p2m_domain *p2m,
-         rc |= _PAGE_PRESENT;
-         goto out;
-     }
-+    if ( gflags & _PAGE_PSE )
-+    {
-+        rc |= _PAGE_PSE | _PAGE_INVALID_BIT;
-+        goto out;
-+    }
-     rc |= ((gflags & mflags) ^ mflags);
- 
-     /* Map the l3 table */
-@@ -238,7 +243,7 @@ guest_walk_tables(struct vcpu *v, struct p2m_domain *p2m,
-     }
-     rc |= ((gflags & mflags) ^ mflags);
-     
--    pse1G = (gflags & _PAGE_PSE) && guest_supports_1G_superpages(v); 
-+    pse1G = !!(gflags & _PAGE_PSE);
- 
-     if ( pse1G )
-     {
-@@ -258,6 +263,8 @@ guest_walk_tables(struct vcpu *v, struct p2m_domain *p2m,
-             /* _PAGE_PSE_PAT not set: remove _PAGE_PAT from flags. */
-             flags &= ~_PAGE_PAT;
- 
-+        if ( !guest_supports_1G_superpages(v) )
-+            rc |= _PAGE_PSE | _PAGE_INVALID_BIT;
-         if ( gfn_x(start) & GUEST_L3_GFN_MASK & ~0x1 )
-             rc |= _PAGE_INVALID_BITS;
- 
--- 
-2.1.4
-
-
-From 42bdc4e1e85d9cecd09ebbf414bf112123da21bc Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@citrix.com>
-Date: Thu, 19 May 2016 18:08:38 +0100
-Subject: [PATCH] hotplug: Fix xendomains lock path for RHEL-based systems
-
-Commit c996572 changed the LOCKFILE path from a check between two
-hardcoded paths (/var/lock/subsys/ or /var/lock) to using the
-XEN_LOCK_DIR variable designated at configure time.  Since
-XEN_LOCK_DIR doesn't (and shouldn't) have the 'subsys' postfix, this
-effectively moves all the lock files by default to /var/lock instead.
-
-Unfortunately, this breaks xendomains on RedHat-based SYSV init
-systems.  RedHat-based SYSV init systems try to only call "${SERVICE}
-shutdown" on systems which actually have an actively running
-component; and they use the existence of /var/lock/subsys/${SERVICE}
-to determine which systems are running.
-
-Changing XEN_LOCK_DIR to /var/lock/subsys is not suitable, as only
-system services like xendomains should create lockfiles there; other
-locks (such as the console locks) should be created in /var/lock
-instead.
-
-Instead, re-instate the check for the subsys/ subdirectory of the lock
-directory in the xendomains script.
-
-Signed-off-by: George Dunlap <george.dunlap@citrix.com>
-Acked-by: Wei Liu <wei.liu2@citrix.com>
-Acked-by: Olaf Hering <olaf@aepfle.de>
-Release-acked-by: Wei Liu <wei.liu2@citrix.com>
----
- tools/hotplug/Linux/xendomains.in | 8 +++++++-
- 1 file changed, 7 insertions(+), 1 deletion(-)
-
-diff --git a/tools/hotplug/Linux/xendomains.in b/tools/hotplug/Linux/xendomains.in
-index 0603842..e749b78 100644
---- a/tools/hotplug/Linux/xendomains.in
-+++ b/tools/hotplug/Linux/xendomains.in
-@@ -49,7 +49,13 @@ if ! [ -e /proc/xen/privcmd ]; then
- 	exit 0
- fi
- 
--LOCKFILE=${XEN_LOCK_DIR}/xendomains
-+# RHEL-based systems only shutdown a service if they find a lockfile
-+# in /var/lock/subsys
-+if [[ -d ${XEN_LOCK_DIR}/subsys ]] ; then
-+    LOCKFILE=${XEN_LOCK_DIR}/subsys/xendomains
-+else
-+    LOCKFILE=${XEN_LOCK_DIR}/xendomains
-+fi
- 
- XENDOM_CONFIG=@CONFIG_DIR@/@CONFIG_LEAF_DIR@/xendomains
- 
--- 
-2.1.4
-
-
-From d6be4c4140f8754e1f94095525ea3de3be221029 Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@citrix.com>
-Date: Thu, 19 May 2016 18:08:54 +0100
-Subject: [PATCH] tools/xendomains: Create lockfile on start unconditionally
-
-At the moment, the xendomains init script will only create a lockfile
-if when started, it actually does something -- either tries to restore
-a previously saved domain as a result of XENDOMAINS_RESTORE, or tries
-to create a domain as a result of XENDOMAINS_AUTO.
-
-RedHat-based SYSV init systems try to only call "${SERVICE} shutdown"
-on systems which actually have an actively running component; and they
-use the existence of /var/lock/subsys/${SERVICE} to determine which
-systems are running.
-
-This means that at the moment, on RedHat-based SYSV systems (such as
-CentOS 6), if you enable xendomains, and have XENDOMAINS_RESTORE set
-to "true", but don't happen to start a VM, then your running VMs will
-not be suspended on shutdown.
-
-Since the lockfile doesn't really have any other effect than to
-prevent duplicate starting, just create it unconditionally every time
-we start the xendomains script.
-
-The other option would have been to touch the lockfile if
-XENDOMAINS_RESTORE was true regardless of whether there were any
-domains to be restored.  But this would mean that if you started with
-the xendomains script active but XENDOMAINS_RESTORE set to "false",
-and then changed it to "true", then xendomains would still not run the
-next time you shut down.  This seems to me to violate the principle of
-least surprise.
-
-Signed-off-by: George Dunlap <george.dunlap@citrix.com>
-Acked-by: Wei Liu <wei.liu2@citrix.com>
-Acked-by: Olaf Hering <olaf@aepfle.de>
-Release-acked-by: Wei Liu <wei.liu2@citrix.com>
----
- tools/hotplug/Linux/xendomains.in | 6 +++---
- 1 file changed, 3 insertions(+), 3 deletions(-)
-
-diff --git a/tools/hotplug/Linux/xendomains.in b/tools/hotplug/Linux/xendomains.in
-index e749b78..1dce21d 100644
---- a/tools/hotplug/Linux/xendomains.in
-+++ b/tools/hotplug/Linux/xendomains.in
-@@ -244,12 +244,13 @@ start()
- 	return;
-     fi
- 
-+    mkdir -p $(dirname "$LOCKFILE")
-+    touch $LOCKFILE
-+
-     saved_domains=" "
-     if [ "$XENDOMAINS_RESTORE" = "true" ] &&
-        contains_something "$XENDOMAINS_SAVE"
-     then
--	mkdir -p $(dirname "$LOCKFILE")
--	touch $LOCKFILE
- 	echo -n "Restoring Xen domains:"
- 	saved_domains=`ls $XENDOMAINS_SAVE`
-         for dom in $XENDOMAINS_SAVE/*; do
-@@ -275,7 +276,6 @@ start()
- 
-     if contains_something "$XENDOMAINS_AUTO"
-     then
--	touch $LOCKFILE
- 	echo -n "Starting auto Xen domains:"
- 	# We expect config scripts for auto starting domains to be in
- 	# XENDOMAINS_AUTO - they could just be symlinks to files elsewhere
 -- 
 2.1.4
 
