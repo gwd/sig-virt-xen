@@ -52,7 +52,7 @@
 Summary: Xen is a virtual machine monitor
 Name:    xen
 Version: 4.7rc4
-Release: 1%{?dist}
+Release: 2%{?dist}
 Group:   Development/Libraries
 License: GPLv2+ and LGPLv2+ and BSD
 URL:     http://xen.org/
@@ -351,7 +351,9 @@ mkdir -p dist/install/boot/efi/efi/%{xen_efi_vendor}
 export XEN_VENDORVERSION="-$(echo %{release} | sed 's/.centos.alt//g')"
 export XEN_DOMAIN="centos.org"
 export debug="n"
-export CFLAGS_EXTRA="$RPM_OPT_FLAGS"
+export EXTRA_CFLAGS_XEN_TOOLS="$RPM_OPT_FLAGS"
+export EXTRA_CFLAGS_QEMU_TRADITIONAL="$RPM_OPT_FLAGS"
+export EXTRA_CFLAGS_QEMU_XEN="$RPM_OPT_FLAGS"
 
 %if %{with_blktap}
 %else
@@ -382,10 +384,13 @@ make %{?_smp_mflags} %{?ocaml_flags} dist-tools
 make                                 dist-docs
 
 %if %{with_stubdom}
-# -fexceptions causes the stubdom build to fail
-export CFLAGS_EXTRA=${CFLAGS_EXTRA/-fexceptions/}
-# ...And maybe other things cause pv_grub to break?
-unset CFLAGS_EXTRA
+# Many of the RPM_OPT_FLAGs cause issues with stubdoms.  The most
+# immediate cause build failures: -m64 will break 32-bit stubdom build
+# for instance, and -fexceptions causses predictably strange
+# breakages.  But even with those removed, the resulting binaries
+# don't function.  Figuring out which ones are possible is left as an
+# exercise for another day.
+unset EXTRA_CFLAGS_XEN_TOOLS
 make %{?ocaml_flags} dist-stubdom
 %endif
 
@@ -901,6 +906,9 @@ rm -rf %{buildroot}
 %endif
 
 %changelog
+* Wed Jun 08 2016 George Dunlap <george.dunlap@citrix.com> 4.7rc4-2.el6.centos
+- Use existing EXTRA_CFLAGS_* mechanism rather than inventing our own
+
 * Tue May 31 2016 George Dunlap <george.dunlap@citrix.com> 4.7rc4-1.el6.centos
 - Rebase to 4.7-rc4
 

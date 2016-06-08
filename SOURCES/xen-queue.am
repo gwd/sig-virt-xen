@@ -163,52 +163,7 @@ index 423c744..72e4b07 100644
 2.1.4
 
 
-From ece01989c3e54137f6728558aa5c97742502357b Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@citrix.com>
-Date: Tue, 31 May 2016 18:41:48 +0100
-Subject: [PATCH] build: Allow extra CFLAGS to be passed in via CFLAGS_EXTRA
-
-Many package systems have a standard set of CFLAGS which want to be
-enabled by default in all packages.  (For example, Fedora and CentOS
-systems want to add $RPM_OPT_FLAGS.)
-
-Before c/s 9a6787c, this was possible by simply setting the CFLAGS
-environment variable before running make; but since that changeset,
-this causes strange errors on build, like the following:
-
-<command-line>:0:0: error: "__OBJECT_FILE__" redefined [-Werror]
-<command-line>:0:0: note: this is the location of the previous definition
-cc1: all warnings being treated as errors
-
-Instead, provide a specific variable, CFLAGS_EXTRA, for builders to
-pass in extra flags.
-
-Note that these flags are not filtered for appropriateness in any way;
-it is up to the caller to make sure that the flags passed in make
-sense.
-
-Based on a patch by Michael Young <m.a.young@durham.ac.uk>
-
-Signed-off-by: George Dunlap <george.dunlap@citrix.com>
----
- config/StdGNU.mk | 2 ++
- 1 file changed, 2 insertions(+)
-
-diff --git a/config/StdGNU.mk b/config/StdGNU.mk
-index 39d36b2..ace7326 100644
---- a/config/StdGNU.mk
-+++ b/config/StdGNU.mk
-@@ -47,3 +47,5 @@ ifeq ($(lto),y)
- CFLAGS += -flto
- LDFLAGS-$(clang) += -plugin LLVMgold.so
- endif
-+
-+CFLAGS += $(CFLAGS_EXTRA)
--- 
-2.1.4
-
-
-From abd570aa0673d5c61860171a164db5c87363d68e Mon Sep 17 00:00:00 2001
+From fd245219b623f78de111f50e0af5c9e697d4c768 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Tue, 31 May 2016 15:54:14 +0100
 Subject: [PATCH] tools/Linux: Fix blktap module name in default module list
@@ -251,7 +206,7 @@ index d0c9e63..21f069c 100644
 2.1.4
 
 
-From 68da31e625b9760605d006ee8b727144cfb0e7ec Mon Sep 17 00:00:00 2001
+From 18ec2b8203cdf08e311d88acb102c5d1df86d7c1 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] xen: Allow user to specify an alternate linker for EFI
@@ -323,7 +278,7 @@ index 5099430..a6dae4c 100644
 2.1.4
 
 
-From b6906689efb1633aecf871eab91b03d8c1422598 Mon Sep 17 00:00:00 2001
+From 9884aa8a2125073353248aca6ea430b765ccac9b Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] Disable iptables on the bridge
@@ -368,7 +323,7 @@ index 92ffa60..0b1fde9 100644
 2.1.4
 
 
-From 754a45baccde86d90d721a8061749e0dfa335f2d Mon Sep 17 00:00:00 2001
+From f2053eed519d46cb82f03fbc511060b05deeb161 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] xen.use.fedora.ipxe.patch
@@ -422,7 +377,7 @@ index f2f4791..c7e37ec 100644
 2.1.4
 
 
-From db119c713093b6d6a8b2c927dd6f94f8c2543f69 Mon Sep 17 00:00:00 2001
+From 2a07e4958b991309266acb3492ed56114cddb94a Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:17 +0000
 Subject: [PATCH] Revert "libxl: prefer qdisk over blktap when choosing disk
@@ -459,32 +414,7 @@ index f79e536..0fb3755 100644
 2.1.4
 
 
-From 4b9ceb9d7dfd508091206bf242a3e8d877d6f3a2 Mon Sep 17 00:00:00 2001
-From: George Dunlap <george.dunlap@eu.citrix.com>
-Date: Thu, 11 Feb 2016 11:29:18 +0000
-Subject: [PATCH] xen-centos-disable-CFLAGS-for-qemu.patch
-
----
- tools/Makefile | 1 +
- 1 file changed, 1 insertion(+)
-
-diff --git a/tools/Makefile b/tools/Makefile
-index 6440dec..dec8639 100644
---- a/tools/Makefile
-+++ b/tools/Makefile
-@@ -247,6 +247,7 @@ subdir-all-qemu-xen-dir: qemu-xen-dir-find
- 	else \
- 		enable_trace_backend='' ; \
- 	fi ; \
-+	env -u CFLAGS \
- 	$$source/configure --enable-xen --target-list=i386-softmmu \
- 		$(QEMU_XEN_ENABLE_DEBUG) \
- 		$$enable_trace_backend \
--- 
-2.1.4
-
-
-From 5e3e12b72fa7866d1118c4e057e69c94a7692ee5 Mon Sep 17 00:00:00 2001
+From 988696e250f9c2a8a6c7a4a2134a8043220385b9 Mon Sep 17 00:00:00 2001
 From: George Dunlap <george.dunlap@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] Adapt libxl to use blktap 2.5 v0.9.2
@@ -597,7 +527,7 @@ index 5c9a0a2..ed1ef20 100644
 2.1.4
 
 
-From f5127d1d37405d6bebfb0d501c64fd303d9bdd78 Mon Sep 17 00:00:00 2001
+From 9657d402634abc17b1e0cd9318cacb758f12880d Mon Sep 17 00:00:00 2001
 From: Julien Grall <julien.grall@linaro.org>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] WORKAROUND: arm64: Fixup PSR
@@ -630,7 +560,7 @@ index 870bc3b..efa618a 100644
 2.1.4
 
 
-From a659db20582fac88b2ab86d2b161a09c88a36ad8 Mon Sep 17 00:00:00 2001
+From 781c1c65340e1bacec84884583c22ab39a6c9eec Mon Sep 17 00:00:00 2001
 From: Stefano Stabellini <stefano.stabellini@eu.citrix.com>
 Date: Thu, 11 Feb 2016 11:29:18 +0000
 Subject: [PATCH] xen/arm: support compressed kernels
